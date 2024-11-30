@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"mime/multipart"
 	"net/http"
 	"os"
@@ -69,6 +70,7 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	err = sendToDiscord(screenshot)
 	if err != nil {
 		http.Error(w, "Failed to send to Discord", http.StatusInternalServerError)
+		log.Print(err)
 		return
 	}
 
