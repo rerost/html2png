@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/chromedp/chromedp"
 )
@@ -39,8 +40,7 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	// Check if file is "hoge.html"
-	if filepath.Base(header.Filename) != "hoge.html" {
+	if !strings.HasSuffix(filepath.Base(header.Filename), ".html") {
 		http.Error(w, "Unsupported file name", http.StatusBadRequest)
 		return
 	}
