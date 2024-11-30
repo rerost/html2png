@@ -1,128 +1,67 @@
 package main
 
 import (
-	"bytes"
 	"context"
+	"flag"
 	"fmt"
-	"io"
-	"log"
-	"mime/multipart"
-	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/chromedp/chromedp"
 )
 
 func main() {
-	http.HandleFunc("/upload", uploadHandler)
+	// コマンドライン引数の定義
+	htmlFile := flag.String("html", "", "Path to the HTML file to render")
+	outputFile := flag.String("output", "output.png", "Path to the output PNG file")
+	flag.Parse()
 
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
+	// 引数の検証
+	if *htmlFile == "" {
+		fmt.Println("Error: HTML file path is required")
+		flag.Usage()
+		os.Exit(1)
 	}
 
-	fmt.Printf("Listening on port %s...\n", port)
-	http.ListenAndServe(":"+port, nil)
+	// HTMLファイルの絶対パスを解決
+	htmlPath, err := filepath.Abs(*htmlFile)
+	if err != nil {
+		fmt.Printf("Error resolving absolute path: %v\n", err)
+		os.Exit(1)
+	}
+
+	// HTMLファイルをPNGにレンダリング
+	if err := renderHTMLToPNG(htmlPath, *outputFile); err != nil {
+		fmt.Printf("Error rendering HTML to PNG: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Successfully rendered %s to %s\n", htmlPath, *outputFile)
 }
 
-func uploadHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Invalid method", http.StatusMethodNotAllowed)
-		return
-	}
-
-	file, header, err := r.FormFile("file")
-	if err != nil {
-		http.Error(w, "Failed to read file", http.StatusBadRequest)
-		return
-	}
-	defer file.Close()
-
-	if !strings.HasSuffix(filepath.Base(header.Filename), ".html") {
-		http.Error(w, "Unsupported file name", http.StatusBadRequest)
-		return
-	}
-
-	// Save file temporarily
-	tempFile, err := os.CreateTemp("", "upload-*.html")
-	if err != nil {
-		http.Error(w, "Failed to create temp file", http.StatusInternalServerError)
-		return
-	}
-	defer os.Remove(tempFile.Name())
-
-	_, err = io.Copy(tempFile, file)
-	if err != nil {
-		http.Error(w, "Failed to save file", http.StatusInternalServerError)
-		return
-	}
-
-	// Render HTML to screenshot
-	screenshot, err := renderHTML(tempFile.Name())
-	if err != nil {
-		http.Error(w, "Failed to render HTML", http.StatusInternalServerError)
-		return
-	}
-
-	// Send screenshot to Discord
-	err = sendToDiscord(screenshot)
-	if err != nil {
-		http.Error(w, "Failed to send to Discord", http.StatusInternalServerError)
-		log.Print(err)
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("File processed and sent to Discord"))
-}
-
-func renderHTML(htmlPath string) ([]byte, error) {
+func renderHTMLToPNG(htmlPath string, outputPath string) error {
+	// Chromedpのコンテキストを作成
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
+	// 結果を格納するバッファ
 	var buf []byte
+
+	// HTMLファイルのフルパス
+	htmlURL := "file://" + htmlPath
+
+	// タスクを実行
 	err := chromedp.Run(ctx,
-		chromedp.Navigate("file://"+htmlPath),
+		chromedp.Navigate(htmlURL),
 		chromedp.FullScreenshot(&buf, 90),
 	)
 	if err != nil {
-		return nil, err
-	}
-	return buf, nil
-}
-
-func sendToDiscord(image []byte) error {
-	discordWebhookURL := os.Getenv("DISCORD_WEBHOOK_URL")
-	if discordWebhookURL == "" {
-		return fmt.Errorf("DISCORD_WEBHOOK_URL is not set")
-	}
-
-	body := &bytes.Buffer{}
-	writer := multipart.NewWriter(body)
-	part, err := writer.CreateFormFile("file", "screenshot.png")
-	if err != nil {
 		return err
 	}
-	part.Write(image)
-	writer.Close()
 
-	req, err := http.NewRequest("POST", discordWebhookURL, body)
-	if err != nil {
+	// ファイルに書き込み
+	if err := os.WriteFile(outputPath, buf, 0644); err != nil {
 		return err
-	}
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-		return fmt.Errorf("Discord returned status code %d", resp.StatusCode)
 	}
 
 	return nil

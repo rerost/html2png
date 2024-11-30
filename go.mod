@@ -1,4 +1,4 @@
-module github.com/rerost/html_2_png_bot
+module github.com/rerost/html2png
 
 go 1.23.3
 
